@@ -165,22 +165,14 @@ def main(
     image_encoder.requires_grad_(False)
     image_processor = CLIPImageProcessor()
 
-    # Set unet trainable parameters
-    # model.requires_grad_(False)
-    # for name, param in model.named_parameters():
-    #     for trainable_module_name in trainable_modules:
-    #         if trainable_module_name in name:
-    #             param.requires_grad = True
-    #             break
-
-    # freeze motion modules
-    model.requires_grad_(True)
+    # Set trainable parameters
+    model.requires_grad_(False)
     for name, param in model.named_parameters():
-        for trainable_module_name in ['motion_modules.']:
+        for trainable_module_name in trainable_modules:
             if trainable_module_name in name:
-                param.requires_grad = False
+                param.requires_grad = True
                 break
-
+                
     trainable_params = list(filter(lambda p: p.requires_grad, model.parameters()))
     optimizer = torch.optim.AdamW(
         trainable_params,
