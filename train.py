@@ -172,7 +172,7 @@ def main(
             if trainable_module_name in name:
                 param.requires_grad = True
                 break
-                
+
     trainable_params = list(filter(lambda p: p.requires_grad, model.parameters()))
     optimizer = torch.optim.AdamW(
         trainable_params,
@@ -430,8 +430,8 @@ def main(
                                                sample_stride=1)
 
                     pixel_values_val = []
-                    for idx in range(batch_size):
-                        pixels = video_data[idx]['pixel_values']
+                    for bsz_idx in range(batch_size):
+                        pixels = video_data[bsz_idx]['pixel_values']
                         pixel_values_val.append(pixels.unsqueeze(0))
 
                     pixel_values_val = torch.cat(pixel_values_val, dim=0)
