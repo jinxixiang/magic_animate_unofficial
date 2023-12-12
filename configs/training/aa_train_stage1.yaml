@@ -46,12 +46,8 @@ train_data:
 
 validation_data:
   prompt_videos:
-    - "/mnt/aigc_cq/shared/multimodal_dataset/fashion/test/919iQ+Yy6qS.mp4"
-    - "/mnt/aigc_cq/shared/multimodal_dataset/fashion/test/A15Tpiz-itS.mp4"
-    - "/mnt/aigc_cq/shared/multimodal_dataset/fashion/train/91VBdLPe6sS.mp4"
-    - "/mnt/aigc_cq/shared/multimodal_dataset/fashion/train/91U6zCbi81S.mp4"
-    - "/mnt/aigc_cq/shared/multimodal_dataset/dance_video/clips/video_1948_clip_3.mp4"
-    - "/mnt/aigc_cq/shared/multimodal_dataset/dance_video/clips/video_1490_clip_0.mp4"
+    - "./test/919iQ+Yy6qS.mp4"
+    - "./test/A15Tpiz-itS.mp4"
   num_inference_steps: 25
   guidance_scale: 8.
   val_video_length: 8
