@@ -1,0 +1,82 @@
+image_finetune: false
+output_dir: "outputs"
+pretrained_model_path: "/path/to/stable-diffusion-v1-5"
+image_encoder_path: "/path/to/IP-Adapter/models/image_encoder"
+pretrained_appearance_encoder_path: "/path/to/MagicAnimate"
+
+unet_additional_kwargs:
+  unet_use_cross_frame_attention: false
+  unet_use_temporal_attention: false
+  use_motion_module: true
+  motion_module_resolutions:
+  - 1
+  - 2
+  - 4
+  - 8
+  motion_module_mid_block: false
+  motion_module_decoder_only: false
+  motion_module_type: Vanilla
+  motion_module_kwargs:
+    num_attention_heads: 8
+    num_transformer_block: 1
+    attention_block_types:
+    - Temporal_Self
+    - Temporal_Self
+    temporal_position_encoding: true
+    temporal_position_encoding_max_len: 24
+    temporal_attention_dim_div: 1
+
+  # Addition for image embeddings
+  use_image_condition            : true
+
+
+noise_scheduler_kwargs:
+  num_train_timesteps: 1000
+  beta_start:          0.00085
+  beta_end:            0.012
+  beta_schedule:       "scaled_linear"
+  steps_offset:        1
+  clip_sample:         false
+
+train_data:
+  json_path:     "./assets/dance_videos.json"
+  sample_size: [768, 512]
+  sample_stride: 1
+  sample_n_frames: 2
+
+validation_data:
+  prompt_videos:
+    - "/mnt/aigc_cq/shared/multimodal_dataset/fashion/test/919iQ+Yy6qS.mp4"
+    - "/mnt/aigc_cq/shared/multimodal_dataset/fashion/test/A15Tpiz-itS.mp4"
+    - "/mnt/aigc_cq/shared/multimodal_dataset/fashion/train/91VBdLPe6sS.mp4"
+    - "/mnt/aigc_cq/shared/multimodal_dataset/fashion/train/91U6zCbi81S.mp4"
+    - "/mnt/aigc_cq/shared/multimodal_dataset/dance_video/clips/video_1948_clip_3.mp4"
+    - "/mnt/aigc_cq/shared/multimodal_dataset/dance_video/clips/video_1490_clip_0.mp4"
+  num_inference_steps: 25
+  guidance_scale: 8.
+  val_video_length: 8
+  sample_size: [768, 512]
+
+
+trainable_modules:
+  - "."
+
+unet_checkpoint_path: ""
+
+learning_rate:    1.e-5
+train_batch_size: 1
+num_workers: 8
+
+max_train_epoch:      -1
+max_train_steps:      100000
+checkpointing_epochs: -1
+checkpointing_steps:  5000
+
+validation_steps:       5000
+validation_steps_tuple: [2, 100, 500, 1000, 2000]
+
+global_seed: 42
+mixed_precision_training: true
+enable_xformers_memory_efficient_attention: True
+
+is_debug: False
