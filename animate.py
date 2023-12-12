@@ -21,26 +21,14 @@ from collections import OrderedDict
 import torch
 
 from diffusers import AutoencoderKL, DDIMScheduler, UniPCMultistepScheduler
-
-from tqdm import tqdm
 from transformers import CLIPTextModel, CLIPTokenizer
-
 from animatediff.magic_animate.unet_controlnet import UNet3DConditionModel
 from animatediff.magic_animate.controlnet import ControlNetModel
 from animatediff.magic_animate.appearance_encoder import AppearanceEncoderModel
-from animatediff.magic_animate.mutual_self_attention import ReferenceAttentionControl
-
 from animatediff.magic_animate.pipeline import AnimationPipeline as TrainPipeline
-from animatediff.utils.util import save_videos_grid
-
 from accelerate.utils import set_seed
 from animatediff.utils.videoreader import VideoReader
 from einops import rearrange, repeat
-
-import csv, pdb, glob
-from safetensors import safe_open
-import math
-from pathlib import Path
 
 
 class MagicAnimate(torch.nn.Module):
