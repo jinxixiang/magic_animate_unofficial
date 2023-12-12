@@ -44,6 +44,7 @@ mim install "mmdet>=3.1.0"
 mim install "mmpose>=1.1.0"
 ```
 
+
 ## Data
 
 To prepare your videos, create a JSON file with a list of video directories. 
