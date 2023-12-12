@@ -28,7 +28,7 @@ image_proj_model = Resampler(
                 ff_mult=4,
             )
 # extract fine-grained features of reference image for cross-attention guidance
-# project from (batch_size, 257, 1280) to (batch_size, 16, 768); replace empty text embeddings with this.
+# project from (batch_size, 257, 1280) to (batch_size, 64, 768); replace empty text embeddings with this.
 encoder_hidden_states = image_proj_model(image_prompts)
 ```
 ## Requirements
