@@ -53,17 +53,17 @@ You can use the public [fashion dataset](https://drive.google.com/drive/folders/
 
 ## Inference
 
-We offer a model weight [Google drive link]() that has been trained using 2,000 dance videos sourced from the web, and subsequently fine-tuned with fashion videos. 
-
-Please note that this weight was not trained from scratch; instead, it was initialized with the official weight from Magic Animate. 
-Additionally, this weight does not utilize the IPAdapter as we originally intended. 
-The presence of background artifacts could potentially be attributed to the fact that very few training videos have a white background as in fashion videos.
-
-Admittedly, this model is far from perfect. 
+We offer a model weight [Google drive link](https://drive.google.com/file/d/1Zai8g2PRcYqTZ77bpZp4igg9ZZjosR4n/view?usp=sharing) that has been trained using 2,000 dance videos sourced from the web, and subsequently fine-tuned with fashion videos. 
 
 ```commandline
 python3 infer.py
 ```
+
+
+Please note that this weight was not trained from scratch; instead, it was initialized with the official weight from Magic Animate. 
+Additionally, this weight does not utilize the IPAdapter as we originally intended. 
+The presence of background artifacts could potentially be attributed to the fact that very few training videos have a white background as in fashion videos. Admittedly, this model is far from perfect. We hope this could be some little help for fast prototyping. 
+
 
 
 <table class="center">
