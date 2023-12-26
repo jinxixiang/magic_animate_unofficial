@@ -87,13 +87,21 @@ class PexelsDataset(Dataset):
     def __init__(
             self,
             json_path,
-            sample_size=(768, 512), sample_stride=1, sample_n_frames=16, is_test=False
+            dwpose_path=None,
+            sample_size=(768, 512),
+            sample_stride=1,
+            sample_n_frames=16,
+            is_test=False,
+            start_idx=None
     ):
         if not isinstance(json_path, list):
             zero_rank_print(f"loading annotations from {json_path} ...")
             self.dataset = json.load(open(json_path))
         else:
             self.dataset = json_path
+
+        self.dwpose_path = dwpose_path
+        self.start_idx = start_idx
 
         self.length = len(self.dataset)
         zero_rank_print(f"data scale: {self.length}")
@@ -103,15 +111,16 @@ class PexelsDataset(Dataset):
 
         self.sample_size = sample_size
 
-        if not is_test:
-            self.pixel_transforms = transforms.Compose([
-                transforms.RandomHorizontalFlip(),
-                transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5], inplace=True),
-            ])
-        else:
-            self.pixel_transforms = transforms.Compose([
-                transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5], inplace=True),
-            ])
+        # if not is_test:
+        #     self.pixel_transforms = transforms.Compose([
+        #         transforms.RandomHorizontalFlip(),
+        #         transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5], inplace=True),
+        #     ])
+        # else:
+
+        self.pixel_transforms = transforms.Compose([
+            transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5], inplace=True),
+        ])
 
     def get_batch(self, idx):
         video_dir = self.dataset[idx]
@@ -119,15 +128,25 @@ class PexelsDataset(Dataset):
         video_length = len(video_reader)
 
         clip_length = min(video_length, (self.sample_n_frames - 1) * self.sample_stride + 1)
-        start_idx = random.randint(0, video_length - clip_length)
+        if self.start_idx is None:
+            start_idx = random.randint(0, video_length - clip_length)
+        else:
+            start_idx = self.start_idx
         batch_index = np.linspace(start_idx, start_idx + clip_length - 1, self.sample_n_frames, dtype=int)
 
         image_np = video_reader.get_batch(batch_index).asnumpy()
-        pixel_values = torch.from_numpy(image_np).permute(0, 3, 1, 2).contiguous()
-        pixel_values = pixel_values / 255.
         del video_reader
 
-        return pixel_values, image_np
+        if self.dwpose_path is not None:
+            fname = video_dir.split("/")[-1]
+            dwpose_dir = os.path.join(self.dwpose_path, fname)
+            pose_reader = VideoReader(dwpose_dir)
+            dwpose_np = pose_reader.get_batch(batch_index).asnumpy()
+            del pose_reader
+        else:
+            dwpose_np = None
+
+        return image_np, dwpose_np
 
     def __len__(self):
         return self.length
@@ -136,7 +155,7 @@ class PexelsDataset(Dataset):
 
         while True:
             try:
-                pixel_values, image_np = self.get_batch(idx)
+                image_np, dwpose_np = self.get_batch(idx)
                 break
 
             except Exception as e:
@@ -145,7 +164,12 @@ class PexelsDataset(Dataset):
         pixel_values = resize_and_crop(image_np, sample_size=self.sample_size)
         pixel_values = self.pixel_transforms(pixel_values)
 
-        sample = dict(pixel_values=pixel_values)
+        if dwpose_np is not None:
+            pixel_values_pose = resize_and_crop(dwpose_np, sample_size=self.sample_size)
+            sample = dict(pixel_values=pixel_values, pixel_values_pose=pixel_values_pose)
+        else:
+            sample = dict(pixel_values=pixel_values)
+
         return sample
 
 
@@ -200,27 +224,3 @@ def get_pose_conditions(image_np, dwpose_model=None):
         dwpose_conditions.append(dwpose_image)
 
     return torch.cat(dwpose_conditions, dim=0)
-
-
-if __name__ == "__main__":
-    from util import save_videos_grid
-
-    dataset = PexelsDataset(json_path="/mnt/aigc_cq/private/jinxixiang/code/diffusion/"
-                                      "animate_anyone/assets/dance_videos.json")
-
-    import pdb
-
-    pdb.set_trace()
-
-    dataloader = torch.utils.data.DataLoader(dataset, batch_size=4, num_workers=16)
-    for idx, batch in enumerate(dataloader):
-
-        import pdb;
-
-        pdb.set_trace()
-
-        print(batch.shape)
-        for i in range(batch.shape[0]):
-            save_videos_grid(batch[i:i + 1].permute(0, 2, 1, 3, 4), os.path.join(".", f"{idx}-{i}.mp4"), rescale=True)
-
-        break

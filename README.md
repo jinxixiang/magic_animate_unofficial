@@ -6,7 +6,7 @@ and [Animatediff](https://github.com/guoyww/AnimateDiff).
 
 ## ToDo
 - [x] **Release Training Code.**
-- [ ] **Release pre-trained weights.**
+- [x] **Release pre-trained weights.**
 
 
 ## Features
@@ -50,6 +50,32 @@ mim install "mmpose>=1.1.0"
 To prepare your videos, create a JSON file with a list of video directories. 
 Then, update the "json_path" value in "./configs/training/aa_train_stage1.yaml" to point to your JSON file.
 You can use the public [fashion dataset](https://drive.google.com/drive/folders/17-BoVYRnG6WLymJ4q2tw-JJp_TC3u52P?usp=sharing) for fast prototyping.
+
+## Inference
+
+We offer a model weight [Google drive link]() that has been trained using 2,000 dance videos sourced from the web, and subsequently fine-tuned with fashion videos. 
+
+Please note that this weight was not trained from scratch; instead, it was initialized with the official weight from Magic Animate. 
+Additionally, this weight does not utilize the IPAdapter as we originally intended. 
+The presence of background artifacts could potentially be attributed to the fact that very few training videos have a white background as in fashion videos.
+
+Admittedly, this model is far from perfect. 
+
+```commandline
+python3 infer.py
+```
+
+
+<table class="center">
+    <tr>
+    <td width=50% style="border: none"><img src="assets/91BjuE6irxS.gif" style="width:100%"></td>
+    <td width=50% style="border: none"><img src="assets/A16PpDz4r2S.gif" style="width:100%"></td>
+    </tr>
+    <tr>
+    <td width=50% style="border: none"><img src="assets/91EWdk0xgDS.gif" style="width:100%"></td>
+    <td width=50% style="border: none"><img src="assets/91Xg-11OuYS.gif" style="width:100%"></td>
+    </tr>
+</table>
 
 
 ## Training

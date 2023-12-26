@@ -13,25 +13,40 @@ from einops import rearrange
 # from animatediff.utils.convert_from_ckpt import convert_ldm_unet_checkpoint, convert_ldm_clip_checkpoint, \
 #     convert_ldm_vae_checkpoint
 from animatediff.utils.convert_lora_safetensor_to_diffusers import convert_lora, convert_motion_lora_ckpt_to_diffusers
-from PIL import Image, ImageOps
-
-
-def pad_image(image):
-    # Get the dimensions of the image
-    width, height = image.size
-
-    # Calculate the padding needed
-    if width < height:
-        diff = height - width
-        padding = (diff // 2, 0, diff - (diff // 2), 0)  # left, top, right, bottom
-    else:
-        diff = width - height
-        padding = (0, diff // 2, 0, diff - (diff // 2))  # left, top, right, bottom
-
-    # Pad the image and return
-    return ImageOps.expand(image, padding)
+import torchvision.transforms as transforms
 
 tensor_interpolation = None
+
+
+def resize_and_crop(images, sample_size=(768, 512)):
+    images_resized = []
+    for image in images:
+        # Determine if width is larger than height or vice versa
+        if image.width > image.height:
+            aspect_ratio = image.width / image.height
+            new_width = int(sample_size[0] * aspect_ratio)
+            resize = transforms.Resize((sample_size[0], new_width))
+        else:
+            aspect_ratio = image.height / image.width
+            new_height = int(sample_size[1] * aspect_ratio)
+            resize = transforms.Resize((new_height, sample_size[1]))
+
+        # Apply the resize transformation
+        image = resize(image)
+
+        # Calculate padding
+        pad_left = (sample_size[1] - image.width) // 2
+        pad_right = sample_size[1] - image.width - pad_left
+        pad_top = (sample_size[0] - image.height) // 2
+        pad_bottom = sample_size[0] - image.height - pad_top
+
+        # Apply padding
+        padding = transforms.Pad((pad_left, pad_top, pad_right, pad_bottom), fill=0)
+        image = padding(image)
+        images_resized.append(image)
+
+    return images_resized
+
 
 def get_tensor_interpolation_method():
     return tensor_interpolation

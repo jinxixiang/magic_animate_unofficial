@@ -37,7 +37,7 @@ from tqdm import tqdm
 from diffusers.utils import is_accelerate_available
 from packaging import version
 from transformers import CLIPTextModel, CLIPTokenizer
-
+import einops
 from diffusers.configuration_utils import FrozenDict
 from diffusers.models import AutoencoderKL
 from diffusers.pipeline_utils import DiffusionPipeline
@@ -353,9 +353,12 @@ class AnimationPipeline(DiffusionPipeline):
 
     def prepare_condition(self, condition, num_videos_per_prompt, device, dtype, do_classifier_free_guidance):
         # prepare conditions for controlnet
-        condition = torch.from_numpy(condition.copy()).to(device=device, dtype=dtype) / 255.0
-        condition = torch.stack([condition for _ in range(num_videos_per_prompt)], dim=0)
-        condition = rearrange(condition, 'b f h w c -> (b f) c h w').clone()
+        # condition = torch.from_numpy(condition.copy()).to(device=device, dtype=dtype) / 255.0
+        condition = condition.to(device=device, dtype=dtype)
+        # condition = torch.stack([condition for _ in range(num_videos_per_prompt)], dim=0)
+        condition = einops.repeat(condition, 'b f c h w -> (b r) f c h w', r=num_videos_per_prompt)
+        condition = rearrange(condition, 'b f c h w -> (b f) c h w').clone()
+        # condition = rearrange(condition, 'b f h w c -> (b f) c h w').clone()
         if do_classifier_free_guidance:
             condition = torch.cat([condition] * 2)
         return condition
@@ -530,7 +533,6 @@ class AnimationPipeline(DiffusionPipeline):
             self,
             prompt: Union[str, List[str]],
             video_length: Optional[int],
-            prompt_embeddings: Optional[torch.FloatTensor] = None,
             height: Optional[int] = None,
             width: Optional[int] = None,
             num_inference_steps: int = 50,
@@ -591,27 +593,21 @@ class AnimationPipeline(DiffusionPipeline):
         do_classifier_free_guidance = guidance_scale > 1.0
 
         # Encode input prompt
-        if prompt_embeddings is None:
-            prompt = prompt if isinstance(prompt, list) else [prompt] * batch_size
-            if negative_prompt is not None:
-                negative_prompt = negative_prompt if isinstance(negative_prompt, list) else [negative_prompt] * batch_size
-            text_embeddings = self._encode_prompt(
-                prompt, device, num_videos_per_prompt, do_classifier_free_guidance, negative_prompt
-            )
-            text_embeddings = torch.cat([text_embeddings] * context_batch_size)
-        else:
-            # project from (batch_size, 257, 1280) to (batch_size, 16, 768)
-            with torch.inference_mode():
-                prompt_embeddings = self.unet.image_proj_model(prompt_embeddings)
-            text_embeddings = torch.cat([prompt_embeddings] * context_batch_size)
+        prompt = prompt if isinstance(prompt, list) else [prompt] * batch_size
+        if negative_prompt is not None:
+            negative_prompt = negative_prompt if isinstance(negative_prompt, list) else [negative_prompt] * batch_size
+        text_embeddings = self._encode_prompt(
+            prompt, device, num_videos_per_prompt, do_classifier_free_guidance, negative_prompt
+        )
+        text_embeddings = torch.cat([text_embeddings] * context_batch_size)
 
         reference_control_writer = ReferenceAttentionControl(appearance_encoder,
-                                                             do_classifier_free_guidance=True,
+                                                             do_classifier_free_guidance=do_classifier_free_guidance,
                                                              mode='write',
                                                              batch_size=context_batch_size,
                                                              clip_length=context_frames)
         reference_control_reader = ReferenceAttentionControl(self.unet,
-                                                             do_classifier_free_guidance=True,
+                                                             do_classifier_free_guidance=do_classifier_free_guidance,
                                                              mode='read',
                                                              batch_size=context_batch_size,
                                                              clip_length=context_frames)
@@ -630,7 +626,10 @@ class AnimationPipeline(DiffusionPipeline):
             num_videos_per_prompt=num_videos_per_prompt,
             do_classifier_free_guidance=do_classifier_free_guidance,
         )
-        controlnet_uncond_images, controlnet_cond_images = control.chunk(2)
+        if do_classifier_free_guidance:
+            controlnet_uncond_images, controlnet_cond_images = control.chunk(2)
+        else:
+            controlnet_cond_images = control
 
         # Prepare timesteps
         self.scheduler.set_timesteps(num_inference_steps, device=device)
@@ -660,7 +659,10 @@ class AnimationPipeline(DiffusionPipeline):
 
         # Prepare text embeddings for controlnet
         controlnet_text_embeddings = text_embeddings.repeat_interleave(video_length, 0)
-        _, controlnet_text_embeddings_c = controlnet_text_embeddings.chunk(2)
+        if do_classifier_free_guidance:
+            _, controlnet_text_embeddings_c = controlnet_text_embeddings.chunk(2)
+        else:
+            controlnet_text_embeddings_c = controlnet_text_embeddings
 
         controlnet_res_samples_cache_dict = {i: None for i in range(video_length)}
 
@@ -670,9 +672,9 @@ class AnimationPipeline(DiffusionPipeline):
 
         if isinstance(source_image, str):
             ref_image_latents = self.images2latents(np.array(Image.open(source_image).resize((width, height)))[None, :],
-                                                    latents_dtype).cuda()
+                                                    latents_dtype).to(device)
         elif isinstance(source_image, np.ndarray):
-            ref_image_latents = self.images2latents(source_image[None, :], latents_dtype).cuda()
+            ref_image_latents = self.images2latents(source_image[None, :], latents_dtype).to(device)
 
         context_scheduler = get_context_scheduler(context_schedule)
 
@@ -768,8 +770,10 @@ class AnimationPipeline(DiffusionPipeline):
 
                 reference_control_reader.clear()
 
-                pred_uc, pred_c = pred.chunk(2)
-                pred = torch.cat([pred_uc.unsqueeze(0), pred_c.unsqueeze(0)])
+                if do_classifier_free_guidance:
+                    pred_uc, pred_c = pred.chunk(2)
+                    pred = torch.cat([pred_uc.unsqueeze(0), pred_c.unsqueeze(0)])
+
                 for j, c in enumerate(context):
                     noise_pred[:, :, c] = noise_pred[:, :, c] + pred[:, j]
                     counter[:, :, c] = counter[:, :, c] + 1
@@ -823,21 +827,33 @@ class AnimationPipeline(DiffusionPipeline):
     def train(
             self,
             prompt: Union[str, List[str]],
-            prompt_embeddings: Optional[torch.FloatTensor] = None,
-            video_length: Optional[int] = 8,
+            video_length: Optional[int],
             height: Optional[int] = None,
             width: Optional[int] = None,
             timestep: Union[torch.Tensor, float, int] = None,
+            num_inference_steps: int = 50,
+            guidance_scale: float = 7.5,
             negative_prompt: Optional[Union[str, List[str]]] = None,
             num_videos_per_prompt: Optional[int] = 1,
+            eta: float = 0.0,
             generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None,
             latents: Optional[torch.FloatTensor] = None,
+            output_type: Optional[str] = "tensor",
+            return_dict: bool = True,
+            callback: Optional[Callable[[int, int, torch.FloatTensor], None]] = None,
             callback_steps: Optional[int] = 1,
             controlnet_condition: list = None,
             controlnet_conditioning_scale: float = 1.0,
+            context_frames: int = 16,
+            context_stride: int = 1,
+            context_overlap: int = 4,
             context_batch_size: int = 1,
+            context_schedule: str = "uniform",
             init_latents: Optional[torch.FloatTensor] = None,
+            num_actual_inference_steps: Optional[int] = None,
             appearance_encoder=None,
+            reference_control_writer=None,
+            reference_control_reader=None,
             source_image: str = None,
             decoder_consistency=None,
             **kwargs,
@@ -870,23 +886,24 @@ class AnimationPipeline(DiffusionPipeline):
         # here `guidance_scale` is defined analog to the guidance weight `w` of equation (2)
         # of the Imagen paper: https://arxiv.org/pdf/2205.11487.pdf . `guidance_scale = 1`
         # corresponds to doing no classifier free guidance.
-        do_classifier_free_guidance = False
+        do_classifier_free_guidance = guidance_scale > 1.0
 
         # Encode input prompt
-        if prompt_embeddings is None:
-            prompt = prompt if isinstance(prompt, list) else [prompt] * batch_size
-            if negative_prompt is not None:
-                negative_prompt = negative_prompt if isinstance(negative_prompt, list) else [negative_prompt] * batch_size
-            text_embeddings = self._encode_prompt(
-                prompt, device, num_videos_per_prompt, do_classifier_free_guidance, negative_prompt
-            )
-            text_embeddings = torch.cat([text_embeddings] * context_batch_size)
-        else:
-            text_embeddings = torch.cat([prompt_embeddings] * context_batch_size)
+        prompt = prompt if isinstance(prompt, list) else [prompt] * batch_size
+        if negative_prompt is not None:
+            negative_prompt = negative_prompt if isinstance(negative_prompt, list) else [negative_prompt] * batch_size
+        text_embeddings = self._encode_prompt(
+            prompt, device, num_videos_per_prompt, do_classifier_free_guidance, negative_prompt
+        )
+        text_embeddings = torch.cat([text_embeddings] * context_batch_size)
 
-        reference_control_writer = ReferenceAttentionControl(appearance_encoder, do_classifier_free_guidance=False,
-                                                             mode='write', batch_size=1)
-        reference_control_reader = ReferenceAttentionControl(self.unet, do_classifier_free_guidance=False, mode='read',
+        reference_control_writer = ReferenceAttentionControl(appearance_encoder,
+                                                             do_classifier_free_guidance=False,
+                                                             mode='write',
+                                                             batch_size=1)
+        reference_control_reader = ReferenceAttentionControl(self.unet,
+                                                             do_classifier_free_guidance=False,
+                                                             mode='read',
                                                              batch_size=1)
 
         # Prepare video
@@ -900,7 +917,10 @@ class AnimationPipeline(DiffusionPipeline):
             do_classifier_free_guidance=do_classifier_free_guidance,
         )
 
-        controlnet_cond_images = control
+        if do_classifier_free_guidance:
+            controlnet_uncond_images, controlnet_cond_images = control.chunk(2)
+        else:
+            controlnet_cond_images = control
 
         # Prepare latent variables
         if init_latents is None:
@@ -923,7 +943,12 @@ class AnimationPipeline(DiffusionPipeline):
         latents_dtype = latents.dtype
 
         # Prepare text embeddings for controlnet
-        controlnet_text_embeddings_c = text_embeddings.repeat_interleave(video_length, 0)
+        controlnet_text_embeddings = text_embeddings.repeat_interleave(video_length, 0)
+
+        if do_classifier_free_guidance:
+            _, controlnet_text_embeddings_c = controlnet_text_embeddings.chunk(2)
+        else:
+            controlnet_text_embeddings_c = controlnet_text_embeddings
 
         if isinstance(source_image, str):
             ref_image_latents = self.images2latents(np.array(Image.open(source_image).resize((width, height)))[None, :],
