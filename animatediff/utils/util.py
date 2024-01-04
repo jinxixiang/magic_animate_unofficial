@@ -17,6 +17,24 @@ import torchvision.transforms as transforms
 
 tensor_interpolation = None
 
+from PIL import Image, ImageOps
+
+
+def pad_image(image):
+    # Get the dimensions of the image
+    width, height = image.size
+
+    # Calculate the padding needed
+    if width < height:
+        diff = height - width
+        padding = (diff // 2, 0, diff - (diff // 2), 0)  # left, top, right, bottom
+    else:
+        diff = width - height
+        padding = (0, diff // 2, 0, diff - (diff // 2))  # left, top, right, bottom
+
+    # Pad the image and return
+    return ImageOps.expand(image, padding)
+    
 
 def resize_and_crop(images, sample_size=(768, 512)):
     images_resized = []
