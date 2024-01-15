@@ -13,15 +13,13 @@ import argparse
 import datetime
 import inspect
 import os
-import random
-
 import numpy as np
 from PIL import Image
 from omegaconf import OmegaConf
 from collections import OrderedDict
 
 import torch
-
+import random
 from diffusers import AutoencoderKL, DDIMScheduler, UniPCMultistepScheduler
 
 from tqdm import tqdm
@@ -38,16 +36,21 @@ from animatediff.utils.util import save_videos_grid, resize_and_crop
 from accelerate.utils import set_seed
 from animatediff.utils.videoreader import VideoReader
 from einops import rearrange, repeat
+
+import csv, pdb, glob
+from safetensors import safe_open
+import math
+from pathlib import Path
+
 from controlnet_aux import DWposeDetector
 
 
 def init_dwpose(device):
-    # specify configs, ckpts and device, or it will be downloaded automatically and use cpu by default；
-    # refer to controlnet_aux for more details
-    det_config = './yolox_l_8xb8-300e_coco.py'
+    # specify configs, ckpts and device, or it will be downloaded automatically and use cpu by default
+    det_config = './configs/yolox_l_8xb8-300e_coco.py'
     det_ckpt = './yolox_l_8x8_300e_coco_20211126_140236-d3bd2b23.pth'
-    pose_config = './dwpose-l_384x288.py'
-    pose_ckpt = './dw-ll_ucoco_384.pth'
+    pose_config = './configs/dwpose-l_384x288.py'
+    pose_ckpt = './models/dw-ll_ucoco_384.pth'
 
     dwpose_model = DWposeDetector(
         det_config=det_config,
@@ -154,7 +157,7 @@ class MagicAnimate(torch.nn.Module):
         self.L = config.L if L is None else L
         print("Initialization Done!")
 
-    def infer(self, source_image, motion_sequence, random_seed, step, guidance_scale, size=(512, 768)):
+    def infer(self, source_image, image_prompts, motion_sequence, random_seed, step, guidance_scale, size=(512, 768)):
         prompt = n_prompt = ""
         random_seed = int(random_seed)
         step = int(step)
@@ -197,29 +200,42 @@ class MagicAnimate(torch.nn.Module):
         if source_image.shape != size:
             source_image = np.array(Image.fromarray(source_image).resize(size))
 
+        # if source_image.shape[0] != size:
+        #     source_image = np.array(Image.fromarray(source_image).resize((size, size)))
         H, W, C = source_image.shape
 
-        init_latents = None
         original_length = control.shape[1]
+        #
         # if control.shape[0] % self.L > 0:
         #     control = np.pad(control, ((0, self.L - control.shape[0] % self.L), (0, 0), (0, 0), (0, 0)), mode='edge')
         generator = torch.Generator(device=self.device)
         generator.manual_seed(torch.initial_seed())
 
+        if image_prompts is not None:
+            # project from (batch_size, 1, 1024) to (batch_size, 16, 768)
+            with torch.inference_mode():
+                image_prompts = self.unet.image_proj_model(image_prompts)
+
         sample = self.pipeline(
             prompt,
             negative_prompt=n_prompt,
+            prompt_embeddings=image_prompts,
             num_inference_steps=step,
             guidance_scale=guidance_scale,
             width=W,
             height=H,
             video_length=control.shape[1],
             controlnet_condition=control,
-            init_latents=init_latents,
+            init_latents=None,  # inference, start from white noise.
             generator=generator,
             appearance_encoder=self.appearance_encoder,
+            unet=self.unet,
             source_image=source_image,
-            context_frames=self.L
+            context_frames=self.L,
+            context_stride=1,
+            context_overlap=4,
+            context_batch_size=1,
+            context_schedule="uniform",
         ).videos
 
         source_images = np.array([source_image] * original_length)
@@ -237,7 +253,7 @@ class MagicAnimate(torch.nn.Module):
 
         return samples_per_video
 
-    def forward(self, init_latents, timestep, source_image, motion_sequence, random_seed):
+    def forward(self, init_latents, image_prompts, timestep, source_image, motion_sequence, random_seed):
         """
         :param init_latents: the most important input during training
         :param timestep: another important input during training
@@ -261,18 +277,18 @@ class MagicAnimate(torch.nn.Module):
         control = motion_sequence
         H, W, C = source_image.shape
 
-        # original_length = control.shape[0]
-        # if control.shape[0] % self.L > 0:
-        #     control = np.pad(control, ((0, self.L - control.shape[0] % self.L), (0, 0), (0, 0), (0, 0)), mode='edge')
-
         generator = torch.Generator(device=self.device)
         generator.manual_seed(torch.initial_seed())
 
+        if image_prompts is not None:
+            # project from (batch_size, 1, 1024) to (batch_size, 16, 768)
+            image_prompts = self.unet.image_proj_model(image_prompts)
+
         noise_pred = self.pipeline.train(
             prompt,
+            prompt_embeddings=image_prompts,
             negative_prompt=n_prompt,
             timestep=timestep,
-            guidance_scale=1,  # training stage, no guidance
             width=W,
             height=H,
             video_length=control.shape[1],
@@ -280,6 +296,7 @@ class MagicAnimate(torch.nn.Module):
             init_latents=init_latents,  # add noise to latents
             generator=generator,
             appearance_encoder=self.appearance_encoder,
+            unet=self.unet,
             source_image=source_image,
         )
 

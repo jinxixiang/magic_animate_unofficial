@@ -532,7 +532,8 @@ class AnimationPipeline(DiffusionPipeline):
     def __call__(
             self,
             prompt: Union[str, List[str]],
-            video_length: Optional[int],
+            prompt_embeddings: Optional[torch.FloatTensor] = None,
+            video_length: Optional[int] = 8,
             height: Optional[int] = None,
             width: Optional[int] = None,
             num_inference_steps: int = 50,
@@ -556,8 +557,7 @@ class AnimationPipeline(DiffusionPipeline):
             init_latents: Optional[torch.FloatTensor] = None,
             num_actual_inference_steps: Optional[int] = None,
             appearance_encoder=None,
-            reference_control_writer=None,
-            reference_control_reader=None,
+            unet=None,
             source_image: str = None,
             decoder_consistency=None,
             **kwargs,
@@ -593,20 +593,23 @@ class AnimationPipeline(DiffusionPipeline):
         do_classifier_free_guidance = guidance_scale > 1.0
 
         # Encode input prompt
-        prompt = prompt if isinstance(prompt, list) else [prompt] * batch_size
-        if negative_prompt is not None:
-            negative_prompt = negative_prompt if isinstance(negative_prompt, list) else [negative_prompt] * batch_size
-        text_embeddings = self._encode_prompt(
-            prompt, device, num_videos_per_prompt, do_classifier_free_guidance, negative_prompt
-        )
-        text_embeddings = torch.cat([text_embeddings] * context_batch_size)
+        if prompt_embeddings is None:
+            prompt = prompt if isinstance(prompt, list) else [prompt] * batch_size
+            if negative_prompt is not None:
+                negative_prompt = negative_prompt if isinstance(negative_prompt, list) else [negative_prompt] * batch_size
+            text_embeddings = self._encode_prompt(
+                prompt, device, num_videos_per_prompt, do_classifier_free_guidance, negative_prompt
+            )
+            text_embeddings = torch.cat([text_embeddings] * context_batch_size)
+        else:
+            text_embeddings = torch.cat([prompt_embeddings] * context_batch_size)
 
         reference_control_writer = ReferenceAttentionControl(appearance_encoder,
                                                              do_classifier_free_guidance=do_classifier_free_guidance,
                                                              mode='write',
                                                              batch_size=context_batch_size,
                                                              clip_length=context_frames)
-        reference_control_reader = ReferenceAttentionControl(self.unet,
+        reference_control_reader = ReferenceAttentionControl(unet,
                                                              do_classifier_free_guidance=do_classifier_free_guidance,
                                                              mode='read',
                                                              batch_size=context_batch_size,
@@ -827,35 +830,23 @@ class AnimationPipeline(DiffusionPipeline):
     def train(
             self,
             prompt: Union[str, List[str]],
-            video_length: Optional[int],
+            prompt_embeddings: Optional[torch.FloatTensor] = None,
+            video_length: Optional[int] = 8,
             height: Optional[int] = None,
             width: Optional[int] = None,
             timestep: Union[torch.Tensor, float, int] = None,
-            num_inference_steps: int = 50,
-            guidance_scale: float = 7.5,
             negative_prompt: Optional[Union[str, List[str]]] = None,
             num_videos_per_prompt: Optional[int] = 1,
-            eta: float = 0.0,
             generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None,
             latents: Optional[torch.FloatTensor] = None,
-            output_type: Optional[str] = "tensor",
-            return_dict: bool = True,
-            callback: Optional[Callable[[int, int, torch.FloatTensor], None]] = None,
             callback_steps: Optional[int] = 1,
             controlnet_condition: list = None,
             controlnet_conditioning_scale: float = 1.0,
-            context_frames: int = 16,
-            context_stride: int = 1,
-            context_overlap: int = 4,
             context_batch_size: int = 1,
-            context_schedule: str = "uniform",
             init_latents: Optional[torch.FloatTensor] = None,
-            num_actual_inference_steps: Optional[int] = None,
             appearance_encoder=None,
-            reference_control_writer=None,
-            reference_control_reader=None,
+            unet=None,
             source_image: str = None,
-            decoder_consistency=None,
             **kwargs,
     ):
         """
@@ -886,22 +877,25 @@ class AnimationPipeline(DiffusionPipeline):
         # here `guidance_scale` is defined analog to the guidance weight `w` of equation (2)
         # of the Imagen paper: https://arxiv.org/pdf/2205.11487.pdf . `guidance_scale = 1`
         # corresponds to doing no classifier free guidance.
-        do_classifier_free_guidance = guidance_scale > 1.0
+        do_classifier_free_guidance = False
 
         # Encode input prompt
-        prompt = prompt if isinstance(prompt, list) else [prompt] * batch_size
-        if negative_prompt is not None:
-            negative_prompt = negative_prompt if isinstance(negative_prompt, list) else [negative_prompt] * batch_size
-        text_embeddings = self._encode_prompt(
-            prompt, device, num_videos_per_prompt, do_classifier_free_guidance, negative_prompt
-        )
-        text_embeddings = torch.cat([text_embeddings] * context_batch_size)
+        if prompt_embeddings is None:
+            prompt = prompt if isinstance(prompt, list) else [prompt] * batch_size
+            if negative_prompt is not None:
+                negative_prompt = negative_prompt if isinstance(negative_prompt, list) else [negative_prompt] * batch_size
+            text_embeddings = self._encode_prompt(
+                prompt, device, num_videos_per_prompt, do_classifier_free_guidance, negative_prompt
+            )
+            text_embeddings = torch.cat([text_embeddings] * context_batch_size)
+        else:
+            text_embeddings = torch.cat([prompt_embeddings] * context_batch_size)
 
         reference_control_writer = ReferenceAttentionControl(appearance_encoder,
                                                              do_classifier_free_guidance=False,
                                                              mode='write',
                                                              batch_size=1)
-        reference_control_reader = ReferenceAttentionControl(self.unet,
+        reference_control_reader = ReferenceAttentionControl(unet,
                                                              do_classifier_free_guidance=False,
                                                              mode='read',
                                                              batch_size=1)
@@ -944,11 +938,7 @@ class AnimationPipeline(DiffusionPipeline):
 
         # Prepare text embeddings for controlnet
         controlnet_text_embeddings = text_embeddings.repeat_interleave(video_length, 0)
-
-        if do_classifier_free_guidance:
-            _, controlnet_text_embeddings_c = controlnet_text_embeddings.chunk(2)
-        else:
-            controlnet_text_embeddings_c = controlnet_text_embeddings
+        controlnet_text_embeddings_c = controlnet_text_embeddings
 
         if isinstance(source_image, str):
             ref_image_latents = self.images2latents(np.array(Image.open(source_image).resize((width, height)))[None, :],
@@ -987,7 +977,7 @@ class AnimationPipeline(DiffusionPipeline):
         new_down_block_res_samples = ()
         for down_idx, down_sample in enumerate(down_block_res_samples):
             down_sample = rearrange(down_sample, '(b f) c h w -> b c f h w', f=video_length)
-            new_down_block_res_samples = new_down_block_res_samples + (down_sample, )
+            new_down_block_res_samples = new_down_block_res_samples + (down_sample,)
         down_block_res_samples = new_down_block_res_samples
 
         # predict the noise residual

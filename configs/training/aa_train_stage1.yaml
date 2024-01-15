@@ -1,13 +1,13 @@
 image_finetune: false
 output_dir: "outputs"
-pretrained_model_path: "/path/to/stable-diffusion-v1-5"
-image_encoder_path: "/path/to/IP-Adapter/models/image_encoder"
-pretrained_appearance_encoder_path: "/path/to/MagicAnimate"
+pretrained_model_path: "./stable-diffusion-v1-5"
+image_encoder_path: "./IP-Adapter/models/image_encoder"
+pretrained_appearance_encoder_path: "./MagicAnimate"
 
 unet_additional_kwargs:
   unet_use_cross_frame_attention: false
   unet_use_temporal_attention: false
-  use_motion_module: true
+  use_motion_module: false
   motion_module_resolutions:
   - 1
   - 2
@@ -27,7 +27,7 @@ unet_additional_kwargs:
     temporal_attention_dim_div: 1
 
   # Addition for image embeddings
-  use_image_condition            : true
+  use_image_condition            : false
 
 
 noise_scheduler_kwargs:
@@ -39,23 +39,23 @@ noise_scheduler_kwargs:
   clip_sample:         false
 
 train_data:
-  json_path:     "./assets/dance_videos.json"
+  json_path:     "./fashion_videos.json"
   sample_size: [768, 512]
   sample_stride: 1
-  sample_n_frames: 2
+  sample_n_frames: 4
 
 validation_data:
   prompt_videos:
     - "./test/919iQ+Yy6qS.mp4"
     - "./test/A15Tpiz-itS.mp4"
   num_inference_steps: 25
-  guidance_scale: 8.
+  guidance_scale: 3.
   val_video_length: 8
   sample_size: [768, 512]
 
 
 trainable_modules:
-  - "."
+  - "controlnet."
 
 unet_checkpoint_path: ""
 
@@ -64,8 +64,8 @@ train_batch_size: 1
 num_workers: 8
 
 max_train_epoch:      -1
-max_train_steps:      100000
-checkpointing_epochs: -1
+max_train_steps:      50000
+checkpointing_epochs: 100
 checkpointing_steps:  5000
 
 validation_steps:       5000

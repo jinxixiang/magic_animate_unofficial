@@ -12,6 +12,7 @@ scripts/
 *.ipynb
 *.safetensors
 *.ckpt
+*.mp4
 
 models/*
 !models/StableDiffusion/

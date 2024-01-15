@@ -203,8 +203,8 @@ class UNet3DConditionModel(ModelMixin, ConfigMixin):
                 depth=4,
                 dim_head=64,
                 heads=12,
-                num_queries=64,
-                embedding_dim=1280,
+                num_queries=16,
+                embedding_dim=1024,
                 output_dim=cross_attention_dim,
                 ff_mult=4,
             )

@@ -141,10 +141,10 @@ def main(
 
     # load dwpose detector, see controlnet_aux: https://github.com/patrickvonplaten/controlnet_aux
     # specify configs, ckpts and device, or it will be downloaded automatically and use cpu by default
-    det_config = '/yolox_l_8xb8-300e_coco.py'
-    det_ckpt = '/yolox_l_8x8_300e_coco_20211126_140236-d3bd2b23.pth'
-    pose_config = '/dwpose-l_384x288.py'
-    pose_ckpt = '/dw-ll_ucoco_384.pth'
+    det_config = './configs/yolox_l_8xb8-300e_coco.py'
+    det_ckpt = './yolox_l_8x8_300e_coco_20211126_140236-d3bd2b23.pth'
+    pose_config = './configs/dwpose-l_384x288.py'
+    pose_ckpt = './models/dw-ll_ucoco_384.pth'
 
     local_rank = accelerator.device
 
@@ -314,7 +314,7 @@ def main(
             noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
 
             # >>>>>>>>>>>> Get the image embedding for conditioning >>>>>>>>>>>>#
-            with torch.no_grad():
+            with torch.inference_mode():
                 ref_pil_images = []
                 encoder_hidden_states = []
 
@@ -326,18 +326,30 @@ def main(
                     ref_pil_image = Image.fromarray(image_np.astype(np.uint8))
                     ref_pil_images.append(ref_pil_image)
 
-                    # debug
-                    # if accelerator.is_main_process:
-                    #     ref_pil_images[0].save("ref_img.jpg")
+                    if unet_additional_kwargs['use_image_condition']:
 
-                    # get fine-grained embeddings
-                    ref_pil_image_pad = pad_image(ref_pil_image)
-                    clip_image = image_processor(images=ref_pil_image_pad, return_tensors="pt").pixel_values
-                    image_emb = image_encoder(clip_image.to(local_rank, dtype=weight_type),
-                                              output_hidden_states=True).hidden_states[-2]
-                    encoder_hidden_states.append(image_emb)
+                        # get global embeddings
+                        ref_pil_image_pad = pad_image(ref_pil_image)
+                        clip_image = image_processor(images=ref_pil_image_pad, return_tensors="pt").pixel_values
+                        image_emb = image_encoder(clip_image.to(local_rank, dtype=weight_type)).image_embeds
 
-                encoder_hidden_states = torch.cat(encoder_hidden_states)
+                        # negative image embeddings
+                        image_np_neg = np.zeros_like(image_np)
+                        ref_pil_image_neg = Image.fromarray(image_np_neg.astype(np.uint8))
+                        ref_pil_image_neg_pad = pad_image(ref_pil_image_neg)
+                        clip_image_neg = image_processor(images=ref_pil_image_neg_pad, return_tensors="pt").pixel_values
+                        image_emb_neg = image_encoder(clip_image_neg.to(local_rank, dtype=weight_type)).image_embeds
+
+                        # for cfg train
+                        if random.random() < 0.1:
+                            image_emb = image_emb_neg
+
+                        encoder_hidden_states.append(image_emb)
+
+                if unet_additional_kwargs['use_image_condition']:
+                    encoder_hidden_states = torch.cat(encoder_hidden_states)
+                else:
+                    encoder_hidden_states = None
 
             # <<<<<<<<<<< Get the image embedding for conditioning <<<<<<<<<<<<<#
 
@@ -354,13 +366,9 @@ def main(
                     dwpose_image = dwpose_model(pil_image, output_type='np', image_resolution=pixel_values.shape[-1])
                     dwpose_conditions.append(dwpose_image)
 
-                    # debug
-                    # if accelerator.is_main_process:
-                    #     img = Image.fromarray(dwpose_image)
-                    #     img.save(f"pose_{frame_id}.jpg")
-
                 dwpose_conditions = np.array(dwpose_conditions)
-
+                dwpose_conditions = torch.from_numpy(dwpose_conditions).unsqueeze(0) / 255.0  # batch size = 1
+                dwpose_conditions = rearrange(dwpose_conditions, 'b f h w c -> b f c h w')
 
             # Get the target for loss depending on the prediction type
             if noise_scheduler.config.prediction_type == "epsilon":
@@ -449,7 +457,10 @@ def main(
                             dwpose_image = dwpose_model(pil_image, output_type='np',
                                                         image_resolution=pixel_values_val.shape[-1])
                             dwpose_conditions.append(dwpose_image)
+
                         dwpose_conditions = np.array(dwpose_conditions)
+                        dwpose_conditions = torch.from_numpy(dwpose_conditions).unsqueeze(0) / 255.0  # batch size = 1
+                        dwpose_conditions = rearrange(dwpose_conditions, 'b f h w c -> b f c h w')
 
                     # get reference image
                     ref_pil_images_val = []
@@ -463,25 +474,28 @@ def main(
                             ref_pil_image = Image.fromarray(image_np.astype(np.uint8))
                             ref_pil_images_val.append(ref_pil_image)
 
-                            # get fine-grained embeddings
-                            ref_pil_image_pad = pad_image(ref_pil_image)
-                            clip_image = image_processor(images=ref_pil_image_pad, return_tensors="pt").pixel_values
-                            image_emb = image_encoder(clip_image.to(local_rank, dtype=weight_type),
-                                                      output_hidden_states=True).hidden_states[-2]
+                            if unet_additional_kwargs['use_image_condition']:
+                                # get global embeddings
+                                ref_pil_image_pad = pad_image(ref_pil_image)
+                                clip_image = image_processor(images=ref_pil_image_pad, return_tensors="pt").pixel_values
+                                image_emb = image_encoder(clip_image.to(local_rank, dtype=weight_type)).image_embeds
 
-                            # negative image embeddings
-                            image_np_neg = np.zeros_like(image_np)
-                            ref_pil_image_neg = Image.fromarray(image_np_neg.astype(np.uint8))
-                            ref_pil_image_pad = pad_image(ref_pil_image_neg)
-                            clip_image_neg = image_processor(images=ref_pil_image_pad, return_tensors="pt").pixel_values
-                            image_emb_neg = image_encoder(clip_image_neg.to(local_rank, dtype=weight_type),
-                                                          output_hidden_states=True).hidden_states[-2]
+                                # negative image embeddings
+                                image_np_neg = np.zeros_like(image_np)
+                                ref_pil_image_neg = Image.fromarray(image_np_neg.astype(np.uint8))
+                                ref_pil_image_neg_pad = pad_image(ref_pil_image_neg)
+                                clip_image_neg = image_processor(images=ref_pil_image_neg_pad,
+                                                                 return_tensors="pt").pixel_values
+                                image_emb_neg = image_encoder(clip_image_neg.to(local_rank, dtype=weight_type)).image_embeds
 
-                            image_emb = torch.cat([image_emb_neg, image_emb])
+                                image_emb = torch.cat([image_emb_neg, image_emb])
 
-                            encoder_hidden_states_val.append(image_emb)
+                                encoder_hidden_states_val.append(image_emb)
 
-                        encoder_hidden_states_val = torch.cat(encoder_hidden_states_val)
+                        if unet_additional_kwargs['use_image_condition']:
+                            encoder_hidden_states_val = torch.cat(encoder_hidden_states_val)
+                        else:
+                            encoder_hidden_states_val = None
 
                     sample = model.infer(
                         source_image=np.array(ref_pil_images_val[0]),

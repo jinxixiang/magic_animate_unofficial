@@ -32,19 +32,19 @@ seed_everything(seed_value)
 
 if __name__ == "__main__":
 
-    prompts = json.load(open("./fashion_test_videos.json"))
+    prompts = json.load(open("./fashion_test_vidoes.json"))
     random.shuffle(prompts)
 
     batch_size = 1
     device = torch.device("cuda:0")
-    val_video_length = 64
+    val_video_length = 16
     sample_size = (768, 512)
 
     # load model
     model = MagicAnimate(device=device, L=16)
 
     # load pretrained weight
-    model_checkpoint_path = "checkpoint-epoch-300.ckpt"
+    model_checkpoint_path = "./models/dwpose_animate.ckpt"
 
     model_checkpoint_path = torch.load(model_checkpoint_path, map_location="cpu")
     state_dict = model_checkpoint_path["state_dict"] if "state_dict" in model_checkpoint_path else model_checkpoint_path
@@ -101,6 +101,7 @@ if __name__ == "__main__":
             # infer a video
             sample = model.infer(
                 source_image=np.array(ref_pil_images_val[0]),
+                image_prompts=None,
                 motion_sequence=dwpose_conditions,
                 random_seed=42,
                 step=25,
@@ -109,4 +110,4 @@ if __name__ == "__main__":
             )
 
             # save a video
-            save_videos_grid(sample, "./outputs", fps=8)
+            save_videos_grid(sample, f"sample_{idx}.mp4", fps=8)
